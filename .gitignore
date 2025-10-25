@@ -1,0 +1,279 @@
+# ========================================
+# CRITICAL - NEVER COMMIT THESE FILES
+# ========================================
+
+# Environment variables with secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.production
+
+# Private keys and wallets
+*.key
+*.pem
+*.p12
+*.pfx
+private-keys/
+wallets/
+
+# Database files (contains sensitive data)
+*.db
+*.sqlite
+*.sqlite3
+backend/blockchain.db
+backend/*.db
+
+# ========================================
+# Dependencies
+# ========================================
+
+# Node modules
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Yarn
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# ========================================
+# Build & Distribution
+# ========================================
+
+# Frontend build
+frontend/build/
+frontend/dist/
+frontend/.cache/
+
+# Backend build
+backend/build/
+backend/dist/
+
+# Production builds
+build/
+dist/
+
+# ========================================
+# Testing
+# ========================================
+
+# Coverage directory
+coverage/
+*.lcov
+.nyc_output/
+
+# Jest
+.jest/
+
+# ========================================
+# IDE & Editor Files
+# ========================================
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+.history/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ========================================
+# Operating System Files
+# ========================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ========================================
+# Logs
+# ========================================
+
+# General logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# Application logs
+backend/logs/
+frontend/logs/
+*.log.*
+
+# ========================================
+# Temporary Files
+# ========================================
+
+# Temporary folders
+tmp/
+temp/
+.tmp/
+.temp/
+
+# Cache
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# ========================================
+# Blockchain Specific
+# ========================================
+
+# Truffle
+build/contracts/
+
+# Hardhat
+artifacts/
+cache/
+typechain/
+typechain-types/
+
+# Foundry
+out/
+cache_hardhat/
+
+# ========================================
+# Package Manager Lock Files
+# ========================================
+
+# Keep package-lock.json but ignore yarn.lock if using npm
+# Uncomment the one you DON'T use:
+
+# If using npm, ignore yarn:
+# yarn.lock
+
+# If using yarn, ignore npm:
+# package-lock.json
+
+# ========================================
+# Miscellaneous
+# ========================================
+
+# Backup files
+*.backup
+*.bak
+*.old
+*.orig
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+
+# Python (if used for scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# ========================================
+# Security & Audit
+# ========================================
+
+# Security reports
+security-report.html
+audit-report.html
+
+# ========================================
+# Project Specific
+# ========================================
+
+# Don't commit these - regenerate for each environment
+backend/.env
+frontend/.env
+
+# Local development overrides
+.env.override
+
+# Test accounts (if any)
+test-accounts.json
+
+# Deployment configurations with secrets
+deploy-config.json
+deployment-keys/
+
+# ========================================
+# IMPORTANT NOTES
+# ========================================
+
+# ✅ SAFE TO COMMIT:
+# - .env.example (template without secrets)
+# - package.json
+# - package-lock.json (or yarn.lock)
+# - README.md
+# - Source code files
+# - Public assets
+
+# ❌ NEVER COMMIT:
+# - .env (contains private keys and secrets)
+# - *.db files (contain user data)
+# - node_modules/ (too large, can be reinstalled)
+# - build/ or dist/ (can be regenerated)
+# - Any file with actual private keys or passwords

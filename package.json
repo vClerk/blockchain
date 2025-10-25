@@ -1,0 +1,21 @@
+{
+  "name": "smart-subsidy",
+  "version": "1.0.0",
+  "description": "Blockchain-based subsidy management system for farmers",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "cd backend && npm start",
+    "frontend": "cd frontend && npm run dev",
+    "compile": "cd contracts && npx hardhat compile",
+    "deploy": "cd contracts && npx hardhat run scripts/deploy.js --network localhost",
+    "test": "cd contracts && npx hardhat test",
+    "node": "cd contracts && npx hardhat node"
+  },
+  "keywords": ["blockchain", "subsidy", "farmers", "smart-contracts", "transparency"],
+  "author": "Smart Subsidy Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

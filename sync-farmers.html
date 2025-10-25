@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync Farmers to Database</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        button {
+            background: #1976d2;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #1565c0;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .log {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+        }
+        .success { color: #2e7d32; }
+        .error { color: #d32f2f; }
+        .info { color: #1976d2; }
+        .warning { color: #f57c00; }
+        .instructions {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 Sync Farmers to Database</h1>
+        <p class="subtitle">This tool helps you manually sync farmers from blockchain to the database</p>
+        
+        <div class="instructions">
+            <strong>📋 Instructions:</strong>
+            <ol>
+                <li>Make sure both backend (port 5000) and frontend (port 3000) servers are running</li>
+                <li>Enter the wallet addresses of farmers who registered on blockchain</li>
+                <li>Click "Sync Farmer" to sync each one to the database</li>
+                <li>Check the government dashboard to see the synced farmers</li>
+            </ol>
+        </div>
+
+        <div>
+            <label for="farmerAddress"><strong>Farmer Wallet Address:</strong></label>
+            <input 
+                type="text" 
+                id="farmerAddress" 
+                placeholder="0x1234567890abcdef1234567890abcdef12345678"
+                value="">
+            <button onclick="syncFarmer()" id="syncBtn">Sync Farmer</button>
+            <button onclick="clearLog()" style="background: #666; margin-left: 10px;">Clear Log</button>
+        </div>
+
+        <div id="log" class="log">
+            <div class="log-entry info">Ready to sync farmers. Enter a wallet address above.</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        
+        function addLog(message, type = 'info') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '<div class="log-entry info">Log cleared.</div>';
+        }
+
+        async function syncFarmer() {
+            const address = document.getElementById('farmerAddress').value.trim();
+            const btn = document.getElementById('syncBtn');
+            
+            if (!address) {
+                addLog('❌ Please enter a farmer wallet address', 'error');
+                return;
+            }
+
+            if (!address.startsWith('0x') || address.length !== 42) {
+                addLog('❌ Invalid Ethereum address format. Should be 42 characters starting with 0x', 'error');
+                return;
+            }
+
+            try {
+                btn.disabled = true;
+                btn.textContent = 'Syncing...';
+                
+                addLog(`🔄 Syncing farmer ${address.substring(0, 8)}...${address.substring(38)}`, 'info');
+                
+                const response = await fetch(`${API_BASE}/blockchain/sync-farmer/${address}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    addLog(`✅ ${data.message}`, 'success');
+                    if (data.data) {
+                        addLog(`   Name: ${data.data.name || 'N/A'}`, 'success');
+                        addLog(`   Location: ${data.data.location || 'N/A'}`, 'success');
+                        addLog(`   Crop: ${data.data.cropType || 'N/A'}`, 'success');
+                        addLog(`   Verified: ${data.data.isVerified ? 'Yes' : 'No'}`, 'success');
+                    }
+                    // Clear input after successful sync
+                    document.getElementById('farmerAddress').value = '';
+                } else {
+                    addLog(`❌ Sync failed: ${data.error || 'Unknown error'}`, 'error');
+                }
+
+            } catch (error) {
+                addLog(`❌ Error: ${error.message}`, 'error');
+                addLog(`   Make sure backend server is running on port 5000`, 'warning');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sync Farmer';
+            }
+        }
+
+        // Allow Enter key to sync
+        document.getElementById('farmerAddress').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                syncFarmer();
+            }
+        });
+
+        // Auto-check if backend is available on load
+        window.addEventListener('load', async function() {
+            try {
+                const response = await fetch(`${API_BASE}/blockchain/stats`);
+                if (response.ok) {
+                    addLog('✅ Backend connection successful', 'success');
+                    const data = await response.json();
+                    if (data.success && data.data) {
+                        addLog(`📊 Total farmers on blockchain: ${data.data.totalFarmers || 0}`, 'info');
+                    }
+                }
+            } catch (error) {
+                addLog('⚠️ Cannot connect to backend. Make sure it\'s running on port 5000', 'warning');
+            }
+        });
+    </script>
+</body>
+</html>
