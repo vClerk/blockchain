@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Box, CircularProgress } from '@mui/material';
+import { Box, CircularProgress, ThemeProvider, CssBaseline } from '@mui/material';
 import { Web3Provider } from './contexts/Web3Context';
-// eslint-disable-next-line no-unused-vars
-import Navbar from './components/Navbar';
-import Landing from './pages/Landing';
+import professionalTheme from './theme/professionalTheme';
+import ProfessionalLanding from './pages/ProfessionalLanding';
+import ProfessionalLogin from './pages/ProfessionalLogin';
 import Dashboard from './pages/Dashboard';
 import FarmerDashboard from './pages/FarmerDashboard';
 import GovernmentDashboard from './pages/GovernmentDashboard';
@@ -49,12 +49,24 @@ function AppContent() {
   }
 
   return (
-    <Box sx={{ flexGrow: 1 }}>
-      <Routes>
-        <Route 
-          path="/login" 
-          element={<MetaMaskLogin onLogin={handleLogin} />} 
-        />
+    <ThemeProvider theme={professionalTheme}>
+      <CssBaseline />
+      <Box sx={{ flexGrow: 1 }}>
+        <Routes>
+          <Route 
+            path="/" 
+            element={<ProfessionalLanding />} 
+          />
+          
+          <Route 
+            path="/login" 
+            element={<ProfessionalLogin onLogin={handleLogin} />} 
+          />
+          
+          <Route 
+            path="/login-old" 
+            element={<MetaMaskLogin onLogin={handleLogin} />} 
+          />
         
         <Route 
           path="/oauth-login" 
@@ -105,13 +117,9 @@ function AppContent() {
           path="/analytics" 
           element={user ? <Analytics /> : <Navigate to="/login" />} 
         />
-        
-        <Route 
-          path="/" 
-          element={<Landing />} 
-        />
       </Routes>
     </Box>
+    </ThemeProvider>
   );
 }
 

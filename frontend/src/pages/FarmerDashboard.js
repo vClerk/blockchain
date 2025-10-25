@@ -55,11 +55,42 @@ const FarmerDashboard = ({ user }) => {
   useEffect(() => {
     loadFarmerData();
     // Load saved documents from localStorage
-    const saved = localStorage.getItem(`documents_${user?.walletAddress}`);
-    if (saved) {
-      setDocuments(JSON.parse(saved));
+    if (user?.walletAddress) {
+      const storageKey = `documents_${user.walletAddress}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsedDocs = JSON.parse(saved);
+          setDocuments(parsedDocs);
+          console.log(`📄 Loaded ${parsedDocs.length} document(s) from localStorage with key: ${storageKey}`);
+        } catch (err) {
+          console.error('Error loading documents:', err);
+          setDocuments([]);
+        }
+      } else {
+        console.log(`📄 No documents found for key: ${storageKey}`);
+        setDocuments([]);
+      }
     }
   }, [user]);
+
+  // Auto-update document statuses when farmer is verified
+  useEffect(() => {
+    if (profile?.isVerified && documents.length > 0 && user?.walletAddress) {
+      const hasUnverifiedDocs = documents.some(doc => doc.status !== 'Verified');
+      if (hasUnverifiedDocs) {
+        const updatedDocs = documents.map(doc => ({
+          ...doc,
+          status: 'Verified',
+          verifiedAt: doc.verifiedAt || new Date().toISOString()
+        }));
+        setDocuments(updatedDocs);
+        const storageKey = `documents_${user.walletAddress}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedDocs));
+        console.log(`✅ Auto-updated ${updatedDocs.length} document(s) to "Verified" status`);
+      }
+    }
+  }, [profile?.isVerified, documents.length, user?.walletAddress]);
 
   const loadFarmerData = async () => {
     try {
@@ -103,7 +134,9 @@ const FarmerDashboard = ({ user }) => {
         // Get payment history
         try {
           const paymentsResponse = await blockchainAPI.getFarmerPayments(user.walletAddress);
-          setPayments(paymentsResponse.data || []);
+          const paymentData = paymentsResponse.data || [];
+          // Ensure it's an array
+          setPayments(Array.isArray(paymentData) ? paymentData : []);
         } catch (err) {
           console.log('No payment history yet:', err.message);
           setPayments([]);
@@ -141,6 +174,11 @@ const FarmerDashboard = ({ user }) => {
       return;
     }
 
+    if (!user?.walletAddress) {
+      setError('Wallet address not found. Please reconnect your wallet.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const doc = {
@@ -154,7 +192,11 @@ const FarmerDashboard = ({ user }) => {
 
       const updatedDocs = [...documents, doc];
       setDocuments(updatedDocs);
-      localStorage.setItem(`documents_${user?.walletAddress}`, JSON.stringify(updatedDocs));
+      
+      // Save to localStorage with the wallet address
+      const storageKey = `documents_${user.walletAddress}`;
+      localStorage.setItem(storageKey, JSON.stringify(updatedDocs));
+      console.log(`✅ Saved ${updatedDocs.length} document(s) to localStorage with key: ${storageKey}`);
       
       setSuccess(`${newDoc.type} uploaded successfully!`);
       setNewDoc({ type: '', file: null, fileName: '' });
@@ -166,7 +208,13 @@ const FarmerDashboard = ({ user }) => {
   const handleDeleteDocument = (docId) => {
     const updatedDocs = documents.filter(d => d.id !== docId);
     setDocuments(updatedDocs);
-    localStorage.setItem(`documents_${user?.walletAddress}`, JSON.stringify(updatedDocs));
+    
+    if (user?.walletAddress) {
+      const storageKey = `documents_${user.walletAddress}`;
+      localStorage.setItem(storageKey, JSON.stringify(updatedDocs));
+      console.log(`✅ Updated documents in localStorage. Remaining: ${updatedDocs.length}`);
+    }
+    
     setSuccess('Document deleted successfully');
   };
 
@@ -277,7 +325,7 @@ const FarmerDashboard = ({ user }) => {
                     Total Received
                   </Typography>
                   <Typography variant="h5" color="info.main">
-                    ${payments.reduce((sum, p) => sum + (p.amount || 0), 0).toFixed(2)}
+                    ${(Array.isArray(payments) ? payments.reduce((sum, p) => sum + (p.amount || 0), 0) : 0).toFixed(2)}
                   </Typography>
                 </Box>
                 <AccountBalance sx={{ fontSize: 50, color: 'info.main' }} />
@@ -358,7 +406,13 @@ const FarmerDashboard = ({ user }) => {
                   />
                   <Chip 
                     label={doc.status} 
-                    color={doc.status === 'Approved' ? 'success' : 'warning'} 
+                    color={
+                      doc.status === 'Verified' || doc.status === 'Approved' 
+                        ? 'success' 
+                        : doc.status === 'Rejected'
+                        ? 'error'
+                        : 'warning'
+                    } 
                     size="small"
                     sx={{ mr: 2 }}
                   />

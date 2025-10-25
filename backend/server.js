@@ -26,10 +26,10 @@ console.log('  - NODE_ENV:', process.env.NODE_ENV || 'development');
 // Trust proxy for rate limiting (fixes X-Forwarded-For warning)
 app.set('trust proxy', 1);
 
-// Rate limiting - Stricter limits for production
+// Rate limiting - More lenient limits for development, stricter for production
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 50 : 100, // Reduced for production
+  max: process.env.NODE_ENV === 'production' ? 50 : 1000, // Very high limit for development
   standardHeaders: true,
   legacyHeaders: false,
   message: 'Too many requests from this IP, please try again later.',
@@ -42,8 +42,29 @@ const limiter = rateLimit({
 // Stricter rate limiting for write operations
 const strictLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Only 20 write operations per 15 minutes
-  message: 'Too many write operations, please try again later.'
+  max: process.env.NODE_ENV === 'production' ? 20 : 500, // Higher limit for development
+  message: 'Too many write operations, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// SECURITY: Additional rate limiting for authentication endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 5 : 100, // More attempts allowed in dev
+  skipSuccessfulRequests: true,
+  message: 'Too many authentication attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// SECURITY: Rate limiting for blockchain operations (most expensive)
+const blockchainOpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 50 : 500, // Higher limit for development
+  message: 'Blockchain operation limit reached. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
 // Security: Configure Helmet with CSP
@@ -67,22 +88,29 @@ app.use(helmet({
   }
 }));
 
-// Security: Configure CORS properly
+// Security: Configure CORS properly with stricter rules
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
+    // SECURITY: Only allow no-origin in development
+    if (!origin) {
+      if (process.env.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      return callback(new Error('Origin header required'));
+    }
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
+      console.warn(`⚠️  Blocked request from unauthorized origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400 // Cache preflight for 24 hours
 }));
 
 app.use(morgan('combined'));
@@ -92,12 +120,12 @@ app.use(limiter);
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
-// Routes
-app.use('/api/blockchain', blockchainRoutes);
+// Routes with appropriate rate limiting
+app.use('/api/blockchain', blockchainOpLimiter, blockchainRoutes);
 app.use('/api/farmers', farmerRoutes);
 app.use('/api/schemes', schemeRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/auth', authRoutes);
+app.use('/api/payments', strictLimiter, paymentRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/analytics', analyticsRoutes);
 
 // Health check

@@ -9,7 +9,12 @@ import {
   Card,
   CardContent,
   Chip,
-  CircularProgress
+  CircularProgress,
+  Stack,
+  useTheme,
+  alpha,
+  Paper,
+  Divider
 } from '@mui/material';
 import {
   AccountBalance,
@@ -17,7 +22,10 @@ import {
   Person,
   AccountBalanceWallet,
   Security,
-  Public
+  Public,
+  CheckCircle,
+  ArrowForward,
+  AdminPanelSettings
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useWeb3 } from '../contexts/Web3Context';

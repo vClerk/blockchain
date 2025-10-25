@@ -1,0 +1,63 @@
+# Fix: Farmer Verification Access Denied
+
+## Problem
+Error when verifying farmer:
+```
+execution reverted (unknown custom error) 0xe2517d3f
+```
+
+This means your wallet `0x2128170857D5A55DbE38E26c758FCa13eAc3428f` does not have GOVERNMENT_ROLE.
+
+## Solution
+
+### Option 1: Use the Quick Script (Recommended)
+
+1. Get the private key of the wallet that deployed the contract
+2. Run this command:
+
+```bash
+node grant-government-role.js YOUR_ADMIN_PRIVATE_KEY
+```
+
+Replace `YOUR_ADMIN_PRIVATE_KEY` with the actual private key.
+
+### Option 2: Use Remix IDE
+
+1. Go to https://remix.ethereum.org
+2. Connect MetaMask (using the admin/deployer wallet)
+3. Switch to Celo Alfajores network
+4. Deploy & Run tab → "At Address": `0x043F679987b6B0c749FBC79B8e56AC8Ed03bc7cF`
+5. Call function: `grantGovernmentRole("0x2128170857D5A55DbE38E26c758FCa13eAc3428f")`
+6. Confirm transaction in MetaMask
+
+### Option 3: Use Hardhat Console
+
+```bash
+cd contracts
+npx hardhat console --network celoAlfajores
+```
+
+Then:
+```javascript
+const contract = await ethers.getContractAt('SmartSubsidy', '0x043F679987b6B0c749FBC79B8e56AC8Ed03bc7cF');
+await contract.grantGovernmentRole('0x2128170857D5A55DbE38E26c758FCa13eAc3428f');
+```
+
+## After Granting Role
+
+1. Refresh your browser
+2. Try verifying a farmer again
+3. The error should be resolved!
+
+## What is GOVERNMENT_ROLE?
+
+Allows your wallet to:
+- ✅ Verify farmers
+- ✅ Create subsidy schemes  
+- ✅ Process payments
+- ✅ Toggle scheme status
+- ✅ Deposit funds
+
+## Need Help?
+
+If you don't have access to the admin/deployer wallet, contact the person who deployed the smart contract to grant you GOVERNMENT_ROLE.

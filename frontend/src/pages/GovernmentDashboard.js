@@ -19,7 +19,17 @@ import {
   Chip,
   Tabs,
   Tab,
-  Divider
+  Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { blockchainAPI } from '../services/api';
@@ -34,7 +44,11 @@ import {
   Dashboard as DashboardIcon,
   People,
   AccountBalance,
-  Payment
+  Payment,
+  Description,
+  Visibility,
+  Close,
+  Download
 } from '@mui/icons-material';
 
 const GovernmentDashboard = ({ user }) => {
@@ -49,6 +63,9 @@ const GovernmentDashboard = ({ user }) => {
   const [success, setSuccess] = useState('');
   const [verifying, setVerifying] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [selectedFarmer, setSelectedFarmer] = useState(null);
+  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
+  const [farmerDocuments, setFarmerDocuments] = useState([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -130,6 +147,19 @@ const GovernmentDashboard = ({ user }) => {
           console.log('✅ Farmer already verified on blockchain, updating database...');
           alreadyVerified = true;
           result = { transactionHash: 'Already Verified' };
+        } else if (blockchainError.message && (
+          blockchainError.message.includes('0xe2517d3f') || 
+          blockchainError.message.includes('execution reverted') ||
+          blockchainError.message.includes('unknown custom error')
+        )) {
+          // Access control error - wallet lacks GOVERNMENT_ROLE
+          throw new Error(
+            `❌ Access Denied: Your wallet does not have GOVERNMENT_ROLE.\n\n` +
+            `Only government officials can verify farmers.\n\n` +
+            `Your wallet: ${account}\n\n` +
+            `Please contact your administrator to grant you GOVERNMENT_ROLE in the smart contract.\n\n` +
+            `Technical details: The smart contract requires GOVERNMENT_ROLE to execute verifyFarmer() function.`
+          );
         } else {
           throw blockchainError; // Re-throw if it's a different error
         }
@@ -139,6 +169,9 @@ const GovernmentDashboard = ({ user }) => {
       try {
         await blockchainAPI.syncFarmer(farmerAddress);
         console.log('✅ Farmer verification synced to storage');
+        
+        // Update all documents for this farmer to "Verified" status
+        updateFarmerDocumentsStatus(farmerAddress, 'Verified');
         
         if (alreadyVerified) {
           setSuccess(`✅ Farmer ${farmerAddress.substring(0, 6)}...${farmerAddress.substring(38)} was already verified on blockchain. Database updated successfully!`);
@@ -202,6 +235,100 @@ const GovernmentDashboard = ({ user }) => {
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
+  };
+
+  const updateFarmerDocumentsStatus = (farmerAddress, newStatus) => {
+    try {
+      // Try different possible key formats
+      const possibleKeys = [
+        `documents_${farmerAddress}`,
+        `documents_${farmerAddress.toLowerCase()}`,
+        `documents_${farmerAddress.toUpperCase()}`
+      ];
+      
+      for (const key of possibleKeys) {
+        const storedDocs = localStorage.getItem(key);
+        if (storedDocs) {
+          try {
+            const docs = JSON.parse(storedDocs);
+            // Update all documents to new status
+            const updatedDocs = docs.map(doc => ({
+              ...doc,
+              status: newStatus,
+              verifiedAt: new Date().toISOString()
+            }));
+            localStorage.setItem(key, JSON.stringify(updatedDocs));
+            console.log(`✅ Updated ${updatedDocs.length} document(s) to status "${newStatus}" for farmer ${farmerAddress}`);
+            return true;
+          } catch (err) {
+            console.error('Error updating documents:', err);
+          }
+        }
+      }
+      console.log(`ℹ️ No documents found to update for farmer ${farmerAddress}`);
+      return false;
+    } catch (err) {
+      console.error('Error in updateFarmerDocumentsStatus:', err);
+      return false;
+    }
+  };
+
+  const handleViewDocuments = (farmer) => {
+    setSelectedFarmer(farmer);
+    
+    // Load documents from localStorage for this farmer
+    // Try different possible key formats to ensure compatibility
+    const possibleKeys = [
+      `documents_${farmer.address}`,
+      `documents_${farmer.address.toLowerCase()}`,
+      `documents_${farmer.address.toUpperCase()}`
+    ];
+    
+    let foundDocs = [];
+    for (const key of possibleKeys) {
+      const storedDocs = localStorage.getItem(key);
+      if (storedDocs) {
+        try {
+          foundDocs = JSON.parse(storedDocs);
+          console.log(`📄 Found ${foundDocs.length} documents for farmer ${farmer.address} using key: ${key}`);
+          break;
+        } catch (err) {
+          console.error('Error parsing documents:', err);
+        }
+      }
+    }
+    
+    // If farmer is verified, ensure all documents show as verified
+    if (farmer.isVerified && foundDocs.length > 0) {
+      foundDocs = foundDocs.map(doc => ({
+        ...doc,
+        status: doc.status === 'Verified' ? doc.status : 'Verified'
+      }));
+    }
+    
+    setFarmerDocuments(foundDocs);
+    setDocumentsDialogOpen(true);
+  };
+
+  const handleCloseDocumentsDialog = () => {
+    setDocumentsDialogOpen(false);
+    setSelectedFarmer(null);
+    setFarmerDocuments([]);
+  };
+
+  const handleDownloadDocument = (doc) => {
+    try {
+      // Create a download link for the document
+      const link = document.createElement('a');
+      link.href = doc.fileData;
+      link.download = doc.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setSuccess(`Document "${doc.fileName}" downloaded successfully!`);
+    } catch (err) {
+      setError('Failed to download document: ' + err.message);
+    }
   };
 
   const renderOverview = () => (
@@ -315,13 +442,6 @@ const GovernmentDashboard = ({ user }) => {
           <Typography variant="h6">
             Registered Farmers ({farmers.length})
           </Typography>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => navigate('/register-farmer')}
-          >
-            Add New Farmer
-          </Button>
         </Box>
         <Divider sx={{ mb: 2 }} />
         
@@ -355,6 +475,7 @@ const GovernmentDashboard = ({ user }) => {
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Crop Type</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Farm Size</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                  <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Documents</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Action</TableCell>
                 </TableRow>
               </TableHead>
@@ -386,6 +507,17 @@ const GovernmentDashboard = ({ user }) => {
                           icon={<PendingActions />}
                         />
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="View Uploaded Documents">
+                        <IconButton
+                          color="primary"
+                          size="small"
+                          onClick={() => handleViewDocuments(farmer)}
+                        >
+                          <Description />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                     <TableCell>
                       {!farmer.isVerified ? (
@@ -638,6 +770,123 @@ const GovernmentDashboard = ({ user }) => {
           )}
         </Box>
       </Paper>
+
+      {/* Documents Dialog */}
+      <Dialog
+        open={documentsDialogOpen}
+        onClose={handleCloseDocumentsDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              Documents - {selectedFarmer?.name}
+            </Typography>
+            <IconButton onClick={handleCloseDocumentsDialog} size="small">
+              <Close />
+            </IconButton>
+          </Box>
+          <Typography variant="body2" color="textSecondary">
+            Wallet: {selectedFarmer?.address}
+          </Typography>
+        </DialogTitle>
+        <DialogContent dividers>
+          {farmerDocuments.length === 0 ? (
+            <Box textAlign="center" py={4}>
+              <Description sx={{ fontSize: 80, color: 'text.disabled', mb: 2 }} />
+              <Typography variant="h6" color="textSecondary" gutterBottom>
+                No Documents Uploaded
+              </Typography>
+              <Typography variant="body2" color="textSecondary" mb={1}>
+                This farmer hasn't uploaded any documents yet.
+              </Typography>
+              <Typography variant="caption" color="textSecondary" sx={{ fontStyle: 'italic' }}>
+                Documents will appear here once the farmer uploads them from their dashboard.
+              </Typography>
+            </Box>
+          ) : (
+            <List>
+              {farmerDocuments.map((doc) => (
+                <ListItem
+                  key={doc.id}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    mb: 1,
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
+                  }}
+                >
+                  <ListItemIcon>
+                    <Description color="primary" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={doc.fileName}
+                    secondary={
+                      <Box>
+                        <Typography variant="body2" component="span">
+                          Type: {doc.type}
+                        </Typography>
+                        <br />
+                        <Typography variant="body2" component="span">
+                          Uploaded: {new Date(doc.uploadedAt).toLocaleString()}
+                        </Typography>
+                        <br />
+                        <Chip
+                          label={doc.status || 'Pending Review'}
+                          size="small"
+                          color={
+                            doc.status === 'Verified' || doc.status === 'Approved'
+                              ? 'success'
+                              : doc.status === 'Rejected'
+                              ? 'error'
+                              : 'warning'
+                          }
+                          sx={{ mt: 0.5 }}
+                        />
+                        {doc.verifiedAt && (
+                          <>
+                            <br />
+                            <Typography variant="caption" color="textSecondary" component="span">
+                              Verified: {new Date(doc.verifiedAt).toLocaleString()}
+                            </Typography>
+                          </>
+                        )}
+                      </Box>
+                    }
+                  />
+                  <Box display="flex" gap={1}>
+                    <Tooltip title="View Document">
+                      <IconButton
+                        color="primary"
+                        onClick={() => window.open(doc.fileData, '_blank')}
+                      >
+                        <Visibility />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Download Document">
+                      <IconButton
+                        color="secondary"
+                        onClick={() => handleDownloadDocument(doc)}
+                      >
+                        <Download />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDocumentsDialog} color="primary">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
