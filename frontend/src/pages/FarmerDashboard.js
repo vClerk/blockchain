@@ -464,7 +464,7 @@ const FarmerDashboard = ({ user }) => {
                             size="small"
                             variant="outlined"
                             onClick={() => window.open(
-                              `https://alfajores.celoscan.io/tx/${payment.transactionHash || payment.txHash}`,
+                              `https://celo-alfajores.blockscout.com/tx/${payment.transactionHash || payment.txHash}`,
                               '_blank'
                             )}
                           >

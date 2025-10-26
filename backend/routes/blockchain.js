@@ -44,10 +44,39 @@ router.get('/farmers', async (req, res) => {
 // Get all schemes from storage
 router.get('/schemes', async (req, res) => {
   try {
-    const schemes = await database.findAllSchemes();
+    const dbSchemes = await database.findAllSchemes();
+    
+    // Enrich with blockchain data if available
+    const enrichedSchemes = await Promise.all(
+      dbSchemes.map(async (dbScheme) => {
+        try {
+          // Get live data from blockchain
+          const blockchainScheme = await blockchainService.getScheme(parseInt(dbScheme.schemeId));
+          
+          // Merge database and blockchain data, with blockchain taking precedence for status
+          return {
+            ...dbScheme,
+            isActive: blockchainScheme.isActive,
+            currentBeneficiaries: blockchainScheme.currentBeneficiaries,
+            amount: blockchainScheme.amount,
+            // Keep database fields that blockchain doesn't have
+            transactionHash: dbScheme.transactionHash,
+            createdAt: dbScheme.createdAt
+          };
+        } catch (err) {
+          console.log(`⚠️  Could not fetch blockchain data for scheme ${dbScheme.schemeId}:`, err.message);
+          // Return database data with assumed active status
+          return {
+            ...dbScheme,
+            isActive: true // Assume active if blockchain not available
+          };
+        }
+      })
+    );
+    
     res.json({
       success: true,
-      data: schemes
+      data: enrichedSchemes
     });
   } catch (error) {
     res.status(500).json({
@@ -226,6 +255,7 @@ router.get('/scheme/:id/beneficiaries', async (req, res) => {
 });
 
 // Register farmer (Protected - requires authentication and role verification)
+// SECURITY: Changed to accept transaction hash instead of private key
 router.post('/register-farmer',
   verifyToken,
   requireRole('government'),
@@ -238,40 +268,74 @@ router.post('/register-farmer',
       return res.status(400).json({
         success: false,
         error: 'Validation errors',
-        details: errors.array()
+        details: process.env.NODE_ENV === 'development' ? errors.array() : undefined
       });
     }
 
-    const { name, location, cropType, farmSize, privateKey } = req.body;
+    const { name, location, cropType, farmSize, transactionHash, farmerAddress } = req.body;
     
-    // Get farmer's address from private key
-    const wallet = new ethers.Wallet(privateKey);
-    const farmerAddress = wallet.address;
+    // Validate Ethereum address format
+    if (!ethers.isAddress(farmerAddress)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Ethereum address format'
+      });
+    }
+    
+    // Validate transaction hash format
+    if (!/^0x[a-fA-F0-9]{64}$/.test(transactionHash)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid transaction hash format'
+      });
+    }
     
     let receipt = null;
     let mockMode = false;
     
-    // Try to register on blockchain, fall back to mock mode if contract not deployed
+    // Verify transaction on blockchain
     try {
-      receipt = await blockchainService.registerFarmer(
-        privateKey, name, location, cropType, parseInt(farmSize)
-      );
+      receipt = await blockchainService.provider.getTransactionReceipt(transactionHash);
+      
+      if (!receipt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction not found on blockchain'
+        });
+      }
+      
+      if (receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction failed on blockchain'
+        });
+      }
+      
+      // Verify transaction is to our contract
+      if (receipt.to.toLowerCase() !== process.env.CONTRACT_ADDRESS.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction is not for the subsidy contract'
+        });
+      }
+      
     } catch (blockchainError) {
       console.log('⚠️  Blockchain not available, using mock mode:', blockchainError.message);
       mockMode = true;
       // Create mock receipt
       receipt = {
-        hash: '0x' + Math.random().toString(16).substring(2, 66),
-        blockNumber: Math.floor(Math.random() * 1000000)
+        hash: transactionHash,
+        blockNumber: Math.floor(Math.random() * 1000000),
+        from: farmerAddress
       };
     }
 
-    // Save to database
+    // Save to database with sanitized inputs
     const farmer = await database.saveFarmer({
       address: farmerAddress.toLowerCase(),
-      name,
-      location,
-      cropType,
+      name: name.trim(),
+      location: location.trim(),
+      cropType: cropType.trim(),
       farmSize: parseInt(farmSize),
       registrationTxHash: receipt.hash,
       isVerified: false,
@@ -291,15 +355,16 @@ router.post('/register-farmer',
       }
     });
   } catch (error) {
-    console.error('❌ Error registering farmer:', error);
+    console.error('❌ Error registering farmer:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: process.env.NODE_ENV === 'production' ? 'Failed to register farmer' : error.message
     });
   }
 });
 
 // Verify farmer (Protected - requires authentication and government role)
+// SECURITY: Changed to accept transaction hash instead of private key
 router.post('/verify-farmer',
   verifyToken,
   requireRole('government'),
@@ -312,41 +377,68 @@ router.post('/verify-farmer',
       return res.status(400).json({
         success: false,
         error: 'Validation errors',
-        details: errors.array()
+        details: process.env.NODE_ENV === 'development' ? errors.array() : undefined
       });
     }
 
-    const { farmerAddress, privateKey } = req.body;
+    const { farmerAddress, transactionHash } = req.body;
+    
+    // Validate Ethereum address format
+    if (!ethers.isAddress(farmerAddress)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Ethereum address format'
+      });
+    }
+    
+    // Validate transaction hash format
+    if (!/^0x[a-fA-F0-9]{64}$/.test(transactionHash)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid transaction hash format'
+      });
+    }
     
     let receipt = null;
     let mockMode = false;
     let alreadyVerified = false;
     
-    // Try to verify on blockchain
+    // Verify transaction on blockchain
     try {
-      receipt = await blockchainService.verifyFarmer(privateKey, farmerAddress);
-    } catch (blockchainError) {
-      // Check if already verified on blockchain
-      if (blockchainError.message && blockchainError.message.includes('already verified')) {
-        console.log('✅ Farmer already verified on blockchain, updating database...');
-        alreadyVerified = true;
-        // Create a reference receipt for the response
-        receipt = {
-          hash: 'N/A - Already Verified',
-          blockNumber: 0
-        };
-      } else {
-        console.log('⚠️  Blockchain not available, using mock mode:', blockchainError.message);
-        mockMode = true;
-        // Create mock receipt
-        receipt = {
-          hash: '0x' + Math.random().toString(16).substring(2, 66),
-          blockNumber: Math.floor(Math.random() * 1000000)
-        };
+      receipt = await blockchainService.provider.getTransactionReceipt(transactionHash);
+      
+      if (!receipt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction not found on blockchain'
+        });
       }
+      
+      if (receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction failed on blockchain'
+        });
+      }
+      
+      // Verify transaction is to our contract
+      if (receipt.to.toLowerCase() !== process.env.CONTRACT_ADDRESS.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction is not for the subsidy contract'
+        });
+      }
+      
+    } catch (blockchainError) {
+      console.log('⚠️  Blockchain not available, using mock mode:', blockchainError.message);
+      mockMode = true;
+      receipt = {
+        hash: transactionHash,
+        blockNumber: Math.floor(Math.random() * 1000000)
+      };
     }
 
-    // ALWAYS update database verification status (even if already verified on blockchain)
+    // ALWAYS update database verification status
     const existingFarmer = await database.findFarmerByAddress(farmerAddress.toLowerCase());
     if (existingFarmer) {
       await database.saveFarmer({
@@ -365,24 +457,22 @@ router.post('/verify-farmer',
         transactionHash: receipt.hash,
         blockNumber: receipt.blockNumber,
         mockMode: mockMode,
-        alreadyVerified: alreadyVerified,
-        message: alreadyVerified 
-          ? 'Farmer was already verified on blockchain. Database updated successfully.' 
-          : mockMode 
-            ? 'Verified in mock mode. Deploy contract to enable blockchain features.' 
-            : 'Successfully verified on blockchain'
+        message: mockMode 
+          ? 'Verified in mock mode. Deploy contract to enable blockchain features.' 
+          : 'Successfully verified on blockchain'
       }
     });
   } catch (error) {
-    console.error('❌ Error verifying farmer:', error);
+    console.error('❌ Error verifying farmer:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: process.env.NODE_ENV === 'production' ? 'Failed to verify farmer' : error.message
     });
   }
 });
 
 // Create subsidy scheme (Protected - requires authentication and government role)
+// SECURITY: Changed to accept transaction hash instead of private key
 router.post('/create-scheme',
   verifyToken,
   requireRole('government'),
@@ -395,49 +485,125 @@ router.post('/create-scheme',
       return res.status(400).json({
         success: false,
         error: 'Validation errors',
-        details: errors.array()
+        details: process.env.NODE_ENV === 'development' ? errors.array() : undefined
       });
     }
 
-    const { name, description, amount, maxBeneficiaries, expiryDate, privateKey, category } = req.body;
+    const { name, description, amount, maxBeneficiaries, expiryDate, transactionHash, creatorAddress, category } = req.body;
     
-    // Get creator's address from private key
-    const wallet = new ethers.Wallet(privateKey);
-    const creatorAddress = wallet.address;
+    // Validate Ethereum address format
+    if (!ethers.isAddress(creatorAddress)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Ethereum address format'
+      });
+    }
+    
+    // Validate transaction hash format
+    if (!/^0x[a-fA-F0-9]{64}$/.test(transactionHash)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid transaction hash format'
+      });
+    }
     
     let receipt = null;
     let mockMode = false;
+    let schemeId = null;
     
-    // Try to create on blockchain, fall back to mock mode if contract not deployed
+    // Verify transaction on blockchain
     try {
-      receipt = await blockchainService.createSubsidyScheme(
-        privateKey, name, description, parseFloat(amount), 
-        parseInt(maxBeneficiaries), parseInt(expiryDate)
-      );
+      receipt = await blockchainService.provider.getTransactionReceipt(transactionHash);
+      
+      if (!receipt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction not found on blockchain'
+        });
+      }
+      
+      if (receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction failed on blockchain'
+        });
+      }
+      
+      // Verify transaction is to our contract
+      if (receipt.to.toLowerCase() !== process.env.CONTRACT_ADDRESS.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction is not for the subsidy contract'
+        });
+      }
+      
+      console.log(`📝 Transaction receipt received:`, {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        logsCount: receipt.logs?.length || 0
+      });
+      
+      // Extract scheme ID from SchemeCreated event
+      const iface = new ethers.Interface([
+        "event SchemeCreated(uint256 indexed schemeId, string name, uint256 amount, address creator)"
+      ]);
+      
+      // Find the SchemeCreated event in the logs
+      if (receipt.logs && receipt.logs.length > 0) {
+        for (const log of receipt.logs) {
+          try {
+            const parsed = iface.parseLog({
+              topics: log.topics,
+              data: log.data
+            });
+            
+            if (parsed && parsed.name === 'SchemeCreated') {
+              schemeId = parsed.args.schemeId.toString();
+              console.log(`✅ Extracted scheme ID from blockchain event: ${schemeId}`);
+              console.log(`   Scheme Name: ${parsed.args.name}`);
+              console.log(`   Amount: ${ethers.formatEther(parsed.args.amount)} CELO`);
+              break;
+            }
+          } catch (e) {
+            // Not a SchemeCreated event, continue
+          }
+        }
+      } else {
+        console.warn('⚠️  No logs found in receipt');
+      }
+      
+      // Fallback: If no event found, use the totalSchemes counter from stats
+      if (!schemeId) {
+        console.log('⚠️  Could not extract scheme ID from event, trying stats...');
+        try {
+          const stats = await blockchainService.getStatistics();
+          schemeId = (parseInt(stats.totalSchemes) - 1).toString(); // Latest scheme ID
+          console.log(`✅ Using scheme ID from stats: ${schemeId}`);
+        } catch (err) {
+          console.warn('⚠️  Could not get scheme ID from stats');
+          schemeId = Date.now();
+        }
+      }
     } catch (blockchainError) {
       console.log('⚠️  Blockchain not available, using mock mode:', blockchainError.message);
       mockMode = true;
-      // Create mock receipt
       receipt = {
-        hash: '0x' + Math.random().toString(16).substring(2, 66),
+        hash: transactionHash,
         blockNumber: Math.floor(Math.random() * 1000000)
       };
+      schemeId = Date.now();
     }
 
-    // Get the scheme ID from blockchain (usually from events or counter)
-    // For now, use timestamp as scheme ID
-    const schemeId = Date.now();
-
-    // Save to database
+    // Save to database with sanitized inputs
     const scheme = await database.saveScheme({
       schemeId,
-      name,
-      description,
+      name: name.trim(),
+      description: description.trim(),
       amount: parseFloat(amount),
       maxBeneficiaries: parseInt(maxBeneficiaries),
       currentBeneficiaries: 0,
       expiryDate: parseInt(expiryDate),
-      category: category || 'General',
+      category: (category || 'General').trim(),
       isActive: true,
       createdBy: creatorAddress.toLowerCase(),
       transactionHash: receipt.hash,
@@ -456,15 +622,16 @@ router.post('/create-scheme',
       }
     });
   } catch (error) {
-    console.error('❌ Error creating scheme:', error);
+    console.error('❌ Error creating scheme:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: process.env.NODE_ENV === 'production' ? 'Failed to create scheme' : error.message
     });
   }
 });
 
 // Pay subsidy (Protected - requires authentication and government role)
+// SECURITY: Changed to accept transaction hash instead of private key
 router.post('/pay-subsidy',
   verifyToken,
   requireRole('government'),
@@ -477,14 +644,61 @@ router.post('/pay-subsidy',
       return res.status(400).json({
         success: false,
         error: 'Validation errors',
-        details: errors.array()
+        details: process.env.NODE_ENV === 'development' ? errors.array() : undefined
       });
     }
 
-    const { schemeId, farmerAddress, remarks, privateKey } = req.body;
-    const receipt = await blockchainService.paySubsidy(
-      privateKey, parseInt(schemeId), farmerAddress, remarks || ''
-    );
+    const { schemeId, farmerAddress, remarks, transactionHash } = req.body;
+    
+    // Validate Ethereum address format
+    if (!ethers.isAddress(farmerAddress)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Ethereum address format'
+      });
+    }
+    
+    // Validate transaction hash format
+    if (!/^0x[a-fA-F0-9]{64}$/.test(transactionHash)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid transaction hash format'
+      });
+    }
+    
+    // Verify transaction on blockchain
+    let receipt;
+    try {
+      receipt = await blockchainService.provider.getTransactionReceipt(transactionHash);
+      
+      if (!receipt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction not found on blockchain'
+        });
+      }
+      
+      if (receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction failed on blockchain'
+        });
+      }
+      
+      // Verify transaction is to our contract
+      if (receipt.to.toLowerCase() !== process.env.CONTRACT_ADDRESS.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction is not for the subsidy contract'
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error verifying transaction:', error.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to verify transaction on blockchain'
+      });
+    }
 
     res.json({
       success: true,
@@ -494,20 +708,22 @@ router.post('/pay-subsidy',
       }
     });
   } catch (error) {
+    console.error('❌ Error processing payment:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: process.env.NODE_ENV === 'production' ? 'Failed to process payment' : error.message
     });
   }
 });
 
 // Deposit funds (Protected - requires authentication and government role)
+// SECURITY: Changed to accept transaction hash instead of private key
 router.post('/deposit-funds',
   verifyToken,
   requireRole('government'),
   [
     body('amount').isFloat({ min: 0.000001 }).withMessage('Amount must be a positive number'),
-    body('privateKey').notEmpty().withMessage('Private key is required')
+    body('transactionHash').matches(/^0x[a-fA-F0-9]{64}$/).withMessage('Invalid transaction hash')
   ],
   async (req, res) => {
   try {
@@ -516,12 +732,45 @@ router.post('/deposit-funds',
       return res.status(400).json({
         success: false,
         error: 'Validation errors',
-        details: errors.array()
+        details: process.env.NODE_ENV === 'development' ? errors.array() : undefined
       });
     }
 
-    const { amount, privateKey } = req.body;
-    const receipt = await blockchainService.depositFunds(privateKey, parseFloat(amount));
+    const { amount, transactionHash } = req.body;
+    
+    // Verify transaction on blockchain
+    let receipt;
+    try {
+      receipt = await blockchainService.provider.getTransactionReceipt(transactionHash);
+      
+      if (!receipt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction not found on blockchain'
+        });
+      }
+      
+      if (receipt.status !== 1) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction failed on blockchain'
+        });
+      }
+      
+      // Verify transaction is to our contract
+      if (receipt.to.toLowerCase() !== process.env.CONTRACT_ADDRESS.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Transaction is not for the subsidy contract'
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error verifying transaction:', error.message);
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to verify transaction on blockchain'
+      });
+    }
 
     res.json({
       success: true,
@@ -531,9 +780,10 @@ router.post('/deposit-funds',
       }
     });
   } catch (error) {
+    console.error('❌ Error depositing funds:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: process.env.NODE_ENV === 'production' ? 'Failed to deposit funds' : error.message
     });
   }
 });

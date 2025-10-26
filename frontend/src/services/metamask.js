@@ -5,6 +5,7 @@ const SMART_SUBSIDY_ABI = [
   "function registerFarmer(string memory _name, string memory _location, string memory _cropType, uint256 _farmSize) external",
   "function verifyFarmer(address farmerAddress) external",
   "function createSubsidyScheme(string memory _name, string memory _description, uint256 _amount, uint256 _maxBeneficiaries, uint256 _expiryDate) external",
+  "function toggleSchemeStatus(uint256 _schemeId) external",
   "function paySubsidy(uint256 _schemeId, address _farmer, string memory _remarks) external",
   "function depositFunds() external payable",
   "function getFarmer(address farmerAddress) external view returns (tuple(string name, string location, string cropType, uint256 farmSize, bool isVerified, bool isActive, uint256 registrationDate, uint256 totalSubsidyReceived))",
@@ -133,13 +134,67 @@ class MetaMaskContractService {
         expiryDate
       );
       const receipt = await tx.wait();
+      
+      // Parse the SchemeCreated event to get the scheme ID
+      let schemeId = null;
+      
+      if (receipt.logs && receipt.logs.length > 0) {
+        // Create interface for parsing the event
+        const iface = new ethers.Interface([
+          "event SchemeCreated(uint256 indexed schemeId, string name, uint256 amount, address creator)"
+        ]);
+        
+        // Find and parse the SchemeCreated event
+        for (const log of receipt.logs) {
+          try {
+            const parsed = iface.parseLog({
+              topics: log.topics,
+              data: log.data
+            });
+            
+            if (parsed && parsed.name === 'SchemeCreated') {
+              schemeId = parsed.args.schemeId.toString();
+              console.log('✅ Extracted scheme ID from event:', schemeId);
+              console.log('📋 Scheme name:', parsed.args.name);
+              console.log('💰 Scheme amount:', ethers.formatEther(parsed.args.amount));
+              break;
+            }
+          } catch (e) {
+            // Not the SchemeCreated event, continue
+          }
+        }
+      }
+      
+      // If we couldn't extract the scheme ID, log a warning
+      if (!schemeId) {
+        console.warn('⚠️ Could not extract scheme ID from transaction receipt');
+      }
+      
+      return {
+        success: true,
+        transactionHash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        schemeId: schemeId, // Include the extracted scheme ID
+        receipt: receipt // Include full receipt for debugging
+      };
+    } catch (error) {
+      throw new Error(`Failed to create subsidy scheme: ${error.message}`);
+    }
+  }
+
+  async toggleSchemeStatus(schemeId) {
+    if (!this.isInitialized()) throw new Error('Service not initialized');
+    
+    try {
+      const tx = await this.contract.toggleSchemeStatus(schemeId);
+      const receipt = await tx.wait();
       return {
         success: true,
         transactionHash: receipt.hash,
         blockNumber: receipt.blockNumber
       };
     } catch (error) {
-      throw new Error(`Failed to create subsidy scheme: ${error.message}`);
+      throw new Error(`Failed to toggle scheme status: ${error.message}`);
     }
   }
 

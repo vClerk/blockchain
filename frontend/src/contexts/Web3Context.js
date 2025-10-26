@@ -33,7 +33,7 @@ const CELO_TESTNET = {
     decimals: 18,
   },
   rpcUrls: ['https://alfajores-forno.celo-testnet.org'],
-  blockExplorerUrls: ['https://alfajores-blockscout.celo-testnet.org'],
+  blockExplorerUrls: ['https://celo-alfajores.blockscout.com'],
 };
 
 export const Web3Provider = ({ children }) => {

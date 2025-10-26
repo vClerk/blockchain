@@ -90,35 +90,29 @@ const SchemeCreation = () => {
       
       console.log('📋 Full transaction result:', result);
       
-      // Extract schemeId from events - try multiple methods
-      let schemeId = null;
+      // Extract schemeId from the result (now returned by metamask service)
+      let schemeId = result.schemeId;
       
-      // Method 1: From events object
-      if (result.events && result.events.SchemeCreated) {
-        schemeId = result.events.SchemeCreated.returnValues?.schemeId || 
-                   result.events.SchemeCreated.returnValues?.[0] ||
-                   result.events.SchemeCreated.args?.schemeId ||
-                   result.events.SchemeCreated.args?.[0];
-        console.log('📌 Extracted schemeId from events:', schemeId);
-      }
-      
-      // Method 2: From logs
-      if (!schemeId && result.logs && result.logs.length > 0) {
-        const schemeLog = result.logs.find(log => log.topics && log.topics.length > 0);
-        if (schemeLog && schemeLog.topics && schemeLog.topics.length > 1) {
-          // SchemeId is usually the first indexed parameter
-          schemeId = parseInt(schemeLog.topics[1], 16);
-          console.log('📌 Extracted schemeId from logs:', schemeId);
-        }
-      }
-      
-      // Method 3: Manual entry as fallback
-      if (!schemeId) {
-        console.warn('⚠️ Could not extract schemeId from transaction result');
-        console.warn('💡 Saving scheme with estimated schemeId...');
+      if (schemeId) {
+        console.log('✅ Scheme ID from transaction:', schemeId);
+      } else {
+        // Fallback: try to extract from receipt logs if not provided
+        console.warn('⚠️ Scheme ID not in result, trying to extract from logs...');
         
-        // Get current timestamp as a unique ID
-        schemeId = Date.now();
+        if (result.receipt && result.receipt.logs && result.receipt.logs.length > 0) {
+          const schemeLog = result.receipt.logs.find(log => log.topics && log.topics.length > 1);
+          if (schemeLog && schemeLog.topics && schemeLog.topics.length > 1) {
+            // SchemeId is the first indexed parameter in topics[1]
+            schemeId = parseInt(schemeLog.topics[1], 16);
+            console.log('📌 Extracted schemeId from logs:', schemeId);
+          }
+        }
+        
+        // Last resort: use timestamp (this should rarely happen now)
+        if (!schemeId && schemeId !== 0) {
+          console.error('❌ Could not extract schemeId from transaction!');
+          throw new Error('Failed to get scheme ID from blockchain. Please try again.');
+        }
       }
       
       // Save scheme to database with all details

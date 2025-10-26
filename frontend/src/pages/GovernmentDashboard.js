@@ -48,7 +48,9 @@ import {
   Description,
   Visibility,
   Close,
-  Download
+  Download,
+  ToggleOn,
+  ToggleOff
 } from '@mui/icons-material';
 
 const GovernmentDashboard = ({ user }) => {
@@ -63,6 +65,7 @@ const GovernmentDashboard = ({ user }) => {
   const [success, setSuccess] = useState('');
   const [verifying, setVerifying] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [togglingScheme, setTogglingScheme] = useState(null);
   const [selectedFarmer, setSelectedFarmer] = useState(null);
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
   const [farmerDocuments, setFarmerDocuments] = useState([]);
@@ -230,6 +233,62 @@ const GovernmentDashboard = ({ user }) => {
       }
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleToggleSchemeStatus = async (schemeId, currentStatus) => {
+    try {
+      setTogglingScheme(schemeId);
+      setError('');
+      setSuccess('');
+      
+      // Check wallet connection
+      if (!isConnected) {
+        setError('Please connect your MetaMask wallet first');
+        return;
+      }
+
+      if (!isConnectedToCelo) {
+        setError('Please connect to Celo Alfajores network');
+        return;
+      }
+
+      // Check if MetaMask contract service is initialized
+      if (!metaMaskContractService.isInitialized()) {
+        setError('Contract service not initialized. Please refresh the page.');
+        return;
+      }
+
+      const actionWord = currentStatus ? 'deactivate' : 'activate';
+      setSuccess(`Toggling scheme status... Please confirm the transaction in MetaMask.`);
+      
+      // Call smart contract to toggle scheme status
+      const result = await metaMaskContractService.toggleSchemeStatus(schemeId);
+      
+      if (result.success) {
+        setSuccess(`✅ Successfully ${actionWord}d scheme! Transaction: ${result.transactionHash}`);
+        
+        // Reload dashboard data to show updated status
+        await loadDashboardData();
+      }
+    } catch (err) {
+      console.error('❌ Error toggling scheme status:', err);
+      
+      // Handle specific error cases
+      if (err.message && err.message.includes('0xe2517d3f')) {
+        setError(
+          `❌ Access Denied: Your wallet does not have GOVERNMENT_ROLE.\n\n` +
+          `Only government officials can toggle scheme status.\n\n` +
+          `Your wallet: ${account}\n\n` +
+          `Please contact your administrator to grant you GOVERNMENT_ROLE in the smart contract.`
+        );
+      } else if (err.message && err.message.includes('user rejected')) {
+        setError('Transaction was rejected by user');
+      } else {
+        setError('Failed to toggle scheme status: ' + (err.message || 'Unknown error'));
+      }
+    } finally {
+      setTogglingScheme(null);
     }
   };
 
@@ -618,16 +677,30 @@ const GovernmentDashboard = ({ user }) => {
                       {scheme.expiryDate ? new Date(parseInt(scheme.expiryDate) * 1000).toLocaleDateString() : 'N/A'}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => {
-                          const contractAddress = process.env.REACT_APP_CELO_TESTNET_CONTRACT_ADDRESS || '0x043F679987b6B0c749FBC79B8e56AC8Ed03bc7cF';
-                          window.open(`https://alfajores.celoscan.io/address/${contractAddress}`, '_blank');
-                        }}
-                      >
-                        View on Chain
-                      </Button>
+                      <Box display="flex" gap={1}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => {
+                            const contractAddress = process.env.REACT_APP_CELO_TESTNET_CONTRACT_ADDRESS || '0x043F679987b6B0c749FBC79B8e56AC8Ed03bc7cF';
+                            window.open(`https://celo-alfajores.blockscout.com/address/${contractAddress}`, '_blank');
+                          }}
+                        >
+                          View on Chain
+                        </Button>
+                        <Button
+                          size="small"
+                          variant={scheme.isActive ? "outlined" : "contained"}
+                          color={scheme.isActive ? "error" : "success"}
+                          startIcon={scheme.isActive ? <ToggleOff /> : <ToggleOn />}
+                          onClick={() => handleToggleSchemeStatus(scheme.schemeId, scheme.isActive)}
+                          disabled={togglingScheme === scheme.schemeId}
+                        >
+                          {togglingScheme === scheme.schemeId 
+                            ? 'Processing...' 
+                            : scheme.isActive ? 'Deactivate' : 'Activate'}
+                        </Button>
+                      </Box>
                     </TableCell>
                   </TableRow>
                 ))}
